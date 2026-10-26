@@ -14,6 +14,8 @@ Shader "Custom/Ocean"
         _SpecularStrength ("Specular Strength", Range(0, 5)) = 1
         _AmbientStrength ("Ambient Strength", Range(0, 1)) = 0.3
         _ReflectionStrength ("Reflection Strength", Range(0, 1)) = 0.5
+        _Wrap ("Diffuse Wrap", Range(0, 1)) = 0.5
+        _MinLitBrightness ("Min Lit Brightness", Range(0, 1)) = 0.3
 
         // Directions come from the _OceanRandom global uploaded by OceanGrid
         [Header(Waves)]
@@ -40,6 +42,8 @@ Shader "Custom/Ocean"
         _DetailTileA ("Detail Tile Size A", Float) = 7
         _DetailTileB ("Detail Tile Size B", Float) = 3.3
         _DetailScrollSpeed ("Detail Scroll Speed", Float) = 0.3
+        // Fraction of the detail strength kept when looking along the surface
+        _GrazingDetail ("Grazing Detail", Range(0, 1)) = 0.3
     }
 
     SubShader
@@ -59,6 +63,8 @@ Shader "Custom/Ocean"
             half _SpecularStrength;
             half _AmbientStrength;
             half _ReflectionStrength;
+            half _Wrap;
+            half _MinLitBrightness;
             half _Steepness;
             half _Wavelength;
             half _SteepFactor;
@@ -73,6 +79,7 @@ Shader "Custom/Ocean"
             float _DetailTileA;
             float _DetailTileB;
             float _DetailScrollSpeed;
+            half _GrazingDetail;
         CBUFFER_END
 
         float4 _OceanRandom[32];
@@ -191,7 +198,7 @@ Shader "Custom/Ocean"
             // Two layers of the detail map, scrolling with the wind at different scales and
             // angles, whiteout-blended onto the wave normal. Mapped in world XZ, so the
             // tangent-space x/y of the map correspond to world X/Z.
-            half3 ApplyDetailNormals(half3 n, float2 posXZ)
+            half3 ApplyDetailNormals(half3 n, float2 posXZ, half strength)
             {
                 float windAngle = radians(_WindAngle);
                 float2 windA = float2(cos(windAngle), sin(windAngle));
@@ -200,8 +207,8 @@ Shader "Custom/Ocean"
 
                 float2 uvA = posXZ / _DetailTileA - windA * t / _DetailTileA;
                 float2 uvB = posXZ / _DetailTileB - windB * t * 0.7 / _DetailTileB;
-                half3 a = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvA), _DetailStrength);
-                half3 b = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvB), _DetailStrength);
+                half3 a = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvA), strength);
+                half3 b = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvB), strength);
                 half3 detail = normalize(half3(a.xy + b.xy, a.z * b.z));
 
                 // Whiteout blend with the Y-up wave normal (detail z = world Y)
@@ -211,16 +218,22 @@ Shader "Custom/Ocean"
             half3 Shade(Light light, half3 albedo, half3 n, half3 v, inout half3 specular)
             {
                 half3 radiance = light.color * light.distanceAttenuation * light.shadowAttenuation;
-                half ndotl = saturate(dot(n, light.direction));
+                half rawNdotL = dot(n, light.direction);
+                half ndotl = saturate(rawNdotL);
                 half3 h = SafeNormalize(light.direction + v);
                 specular += radiance * pow(saturate(dot(n, h)), _SpecularPower) * _SpecularStrength * ndotl;
-                return radiance * albedo * ndotl;
+
+
+                half wrapped = saturate((rawNdotL + _Wrap) / (1 + _Wrap));
+                return radiance * albedo * lerp(_MinLitBrightness, 1, wrapped);
             }
 
             half4 frag(Varyings IN) : SV_Target
             {
-                half3 n = ApplyDetailNormals(OceanNormal(IN.gridWS), IN.gridWS.xz);
                 half3 v = GetWorldSpaceNormalizeViewDir(IN.positionWS);
+                half3 waveNormal = OceanNormal(IN.gridWS);
+                half detailStrength = _DetailStrength * lerp(_GrazingDetail, 1, saturate(dot(waveNormal, v)));
+                half3 n = ApplyDetailNormals(waveNormal, IN.gridWS.xz, detailStrength);
                 half3 albedo = lerp(_DeepColor.rgb, _CrestColor.rgb, saturate(IN.height * _CrestColorScale + 0.5));
 
                 half3 specular = 0;
@@ -250,7 +263,11 @@ Shader "Custom/Ocean"
                 LIGHT_LOOP_END
                 #endif // ADDITIONAL LIGHTS
 
-                half3 reflection = GlossyEnvironmentReflection(reflect(-v, n), 1 - _Smoothness, _ReflectionStrength);
+                // Normals tilted away from the camera reflect below the horizon, into the dark
+                // lower half of the sky; mirror those back up so they still reflect sky
+                half3 r = reflect(-v, n);
+                r.y = abs(r.y);
+                half3 reflection = GlossyEnvironmentReflection(r, 1 - _Smoothness, _ReflectionStrength);
                 half fresnel = 0.02 + 0.98 * pow(1 - saturate(dot(n, v)), _FresnelPower);
                 color = lerp(color, reflection, fresnel) + specular;
 

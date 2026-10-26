@@ -121,6 +121,7 @@ Material:
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _Metallic: 0
+    - _MinLitBrightness: 0.3
     - _MinVertexWavelength: 0.01
     - _NumWaves: 32
     - _OcclusionStrength: 1
@@ -145,6 +146,7 @@ Material:
     - _WindAngle: 0
     - _WindSpread: 180
     - _WorkflowMode: 1
+    - _Wrap: 1
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}

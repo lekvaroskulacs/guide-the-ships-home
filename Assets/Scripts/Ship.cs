@@ -1,14 +1,20 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
+[RequireComponent(typeof(NavMeshAgent))]
 public class Ship : MonoBehaviour
 {
-    [SerializeField] GameObject ocean;
+    GameObject ocean;
+    NavMeshAgent agent;
 
     [Tooltip("How quickly the ship tilts to match the wave normal")]
     [SerializeField] float tiltSmoothing = 4f;
 
     [Tooltip("Fixed-point iterations used to undo the Gerstner waves' horizontal displacement")]
     [SerializeField] int heightIterations = 3;
+
+    [SerializeField] List<Transform> samplePoints;
 
     // Same names as in Ocean.shader
     static readonly int OceanRandomId = Shader.PropertyToID("_OceanRandom");
@@ -32,16 +38,45 @@ public class Ship : MonoBehaviour
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
-        material = ocean.GetComponent<MeshRenderer>().sharedMaterial;
         heading = transform.eulerAngles.y;
+        ocean = GameObject.FindWithTag("Ocean");
+        material = ocean.GetComponent<MeshRenderer>().sharedMaterial;
+
+        agent = GetComponent<NavMeshAgent>();
+        agent.updatePosition = false;
+        agent.updateRotation = false;
+
+        GameObject lighthouse = GameObject.FindWithTag("Lighthouse");
+        if (lighthouse != null)
+            agent.SetDestination(lighthouse.transform.position);
     }
 
     // Update is called once per frame
     void Update()
     {
-        SampleWaterHeightNormal(transform.position, out height, out normal);
+        Vector3 position = agent.nextPosition;
+        position.y = transform.position.y;
+        transform.position = position;
 
-        Vector3 position = transform.position;
+        Vector3 velocity = agent.velocity;
+        velocity.y = 0f;
+        if (velocity.sqrMagnitude > 0.01f)
+        {
+            float targetHeading = Mathf.Atan2(velocity.x, velocity.z) * Mathf.Rad2Deg;
+            heading = Mathf.MoveTowardsAngle(heading, targetHeading, agent.angularSpeed * Time.deltaTime);
+        }
+
+        Vector3 sumNormal = Vector3.zero;
+        foreach (var point in samplePoints)
+        {
+            SampleWaterHeightNormal(point.position, out _, out normal);
+            sumNormal += normal;
+        }
+
+        SampleWaterHeightNormal(transform.position, out height, out normal);
+        sumNormal += normal;
+        normal = sumNormal.normalized;
+
         position.y = height;
         transform.position = position;
 
