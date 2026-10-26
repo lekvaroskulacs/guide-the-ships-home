@@ -3,40 +3,82 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-// Hooks the lighthouse asset's loose PBR maps (albedo/metallic/roughness/AO/normal/emissive/opacity)
-// up to its extracted URP Lit materials. Run via Tools > Setup Lighthouse Materials.
-public static class LighthouseMaterialSetup
+// Hooks imported models' loose PBR maps (albedo/metallic/roughness/AO/normal/emissive/opacity)
+// up to their extracted URP Lit materials. Run via Tools > Setup Imported Materials.
+public static class ImportedMaterialSetup
 {
-    const string MaterialsFolder = "Assets/Models/lighthouse/source/Export/Materials";
-    const string TexturesFolder = "Assets/Models/lighthouse/source/Export/Textures";
+    // Where a model's materials and textures live, and how its texture files are named
+    class TextureSet
+    {
+        public string Label;
+        public string MaterialsFolder;
+        public string TexturesFolder;
+        // {0} = material name, {1} = map suffix
+        public string NameFormat = "{0}_{1}";
+        public string Albedo = "albedo";
+        public string Metallic = "metallic";
+        public string Roughness = "roughness";
+        public string AO = "AO";
+        public string Normal = "normal";
+        public string Emissive = "emissive";
+        public string Opacity = "opacity";
+    }
+
+    static readonly TextureSet[] Sets =
+    {
+        new TextureSet
+        {
+            Label = "Lighthouse",
+            MaterialsFolder = "Assets/Models/lighthouse/source/Export/Materials",
+            TexturesFolder = "Assets/Models/lighthouse/source/Export/Textures",
+        },
+        new TextureSet
+        {
+            Label = "Cargo ship",
+            MaterialsFolder = "Assets/Models/cargo-ship/source/Cargo ship/Materials",
+            TexturesFolder = "Assets/Models/cargo-ship/textures",
+            NameFormat = "cargo_fin1_lp_{0}_{1}",
+            Albedo = "BaseColor",
+            Metallic = "Metallic",
+            Roughness = "Roughness",
+            Normal = "Normal",
+        },
+    };
+
     static readonly string[] Extensions = { ".png", ".jpg", ".jpeg" };
 
-    [MenuItem("Tools/Setup Lighthouse Materials")]
+    [MenuItem("Tools/Setup Imported Materials")]
     public static void Setup()
     {
-        int configured = 0;
-        foreach (string guid in AssetDatabase.FindAssets("t:Material", new[] { MaterialsFolder }))
+        foreach (TextureSet set in Sets)
         {
-            string matPath = AssetDatabase.GUIDToAssetPath(guid);
-            Material mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
-            if (SetupMaterial(mat))
-                configured++;
+            if (!AssetDatabase.IsValidFolder(set.MaterialsFolder))
+                continue;
+
+            int configured = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Material", new[] { set.MaterialsFolder }))
+            {
+                string matPath = AssetDatabase.GUIDToAssetPath(guid);
+                Material mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                if (SetupMaterial(mat, set))
+                    configured++;
+            }
+            Debug.Log($"{set.Label} material setup: configured {configured} materials.");
         }
 
         AssetDatabase.SaveAssets();
-        Debug.Log($"Lighthouse material setup: configured {configured} materials.");
     }
 
-    static bool SetupMaterial(Material mat)
+    static bool SetupMaterial(Material mat, TextureSet set)
     {
         string name = mat.name;
-        string albedo = FindTexture(name, "albedo");
-        string metallic = FindTexture(name, "metallic");
-        string roughness = FindTexture(name, "roughness");
-        string ao = FindTexture(name, "AO");
-        string normal = FindTexture(name, "normal");
-        string emissive = FindTexture(name, "emissive");
-        string opacity = FindTexture(name, "opacity");
+        string albedo = FindTexture(set, name, set.Albedo);
+        string metallic = FindTexture(set, name, set.Metallic);
+        string roughness = FindTexture(set, name, set.Roughness);
+        string ao = FindTexture(set, name, set.AO);
+        string normal = FindTexture(set, name, set.Normal);
+        string emissive = FindTexture(set, name, set.Emissive);
+        string opacity = FindTexture(set, name, set.Opacity);
 
         if (albedo == null && normal == null && roughness == null)
             return false;
@@ -46,14 +88,14 @@ public static class LighthouseMaterialSetup
 
         // Opacity lives in the albedo's alpha channel in URP
         if (albedo != null && opacity != null)
-            albedo = PackAlbedoAlpha(name, albedo, opacity);
+            albedo = PackAlbedoAlpha(set, name, albedo, opacity);
         if (albedo != null)
             mat.SetTexture("_BaseMap", LoadTexture(albedo, srgb: true));
 
         // URP wants metallic in R and smoothness (1 - roughness) in A of a single map
         if (metallic != null || roughness != null)
         {
-            string packed = PackMetallicSmoothness(name, metallic, roughness);
+            string packed = PackMetallicSmoothness(set, name, metallic, roughness);
             mat.SetTexture("_MetallicGlossMap", LoadTexture(packed, srgb: false));
             mat.SetFloat("_Smoothness", 1f);
             mat.SetFloat("_SmoothnessTextureChannel", 0f);
@@ -93,12 +135,12 @@ public static class LighthouseMaterialSetup
         return true;
     }
 
-    static string FindTexture(string materialName, string suffix)
+    static string FindTexture(TextureSet set, string materialName, string suffix)
     {
         // Prefer png when the export contains both png and jpg versions
         foreach (string ext in Extensions)
         {
-            string path = $"{TexturesFolder}/{materialName}_{suffix}{ext}";
+            string path = $"{set.TexturesFolder}/{string.Format(set.NameFormat, materialName, suffix)}{ext}";
             if (File.Exists(path))
                 return path;
         }
@@ -133,7 +175,7 @@ public static class LighthouseMaterialSetup
         return tex;
     }
 
-    static string PackMetallicSmoothness(string name, string metallicPath, string roughnessPath)
+    static string PackMetallicSmoothness(TextureSet set, string name, string metallicPath, string roughnessPath)
     {
         Texture2D metallic = metallicPath != null ? ReadPixels(metallicPath) : null;
         Texture2D roughness = roughnessPath != null ? ReadPixels(roughnessPath) : null;
@@ -154,10 +196,10 @@ public static class LighthouseMaterialSetup
         }
         output.SetPixels(pixels);
 
-        return WritePng(output, $"{TexturesFolder}/{name}_MetallicSmoothness.png", srgb: false);
+        return WritePng(output, $"{set.TexturesFolder}/{name}_MetallicSmoothness.png", srgb: false);
     }
 
-    static string PackAlbedoAlpha(string name, string albedoPath, string opacityPath)
+    static string PackAlbedoAlpha(TextureSet set, string name, string albedoPath, string opacityPath)
     {
         Texture2D albedo = ReadPixels(albedoPath);
         Texture2D opacity = ReadPixels(opacityPath);
@@ -175,7 +217,7 @@ public static class LighthouseMaterialSetup
         }
         output.SetPixels(pixels);
 
-        return WritePng(output, $"{TexturesFolder}/{name}_albedoAlpha.png", srgb: true);
+        return WritePng(output, $"{set.TexturesFolder}/{name}_albedoAlpha.png", srgb: true);
     }
 
     static string WritePng(Texture2D texture, string path, bool srgb)

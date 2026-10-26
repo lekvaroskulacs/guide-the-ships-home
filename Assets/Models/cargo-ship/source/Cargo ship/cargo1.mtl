@@ -1,0 +1,12 @@
+# Recreated: the original archive was missing this file.
+# Declares the three texture sets used by cargo1.obj; textures are assigned in Unity
+# by Tools > Setup Imported Materials.
+
+newmtl 1001
+Kd 1.000 1.000 1.000
+
+newmtl 1002
+Kd 1.000 1.000 1.000
+
+newmtl 1003
+Kd 1.000 1.000 1.000

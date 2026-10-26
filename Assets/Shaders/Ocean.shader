@@ -32,6 +32,14 @@ Shader "Custom/Ocean"
         // Max deviation of each wave from the wind direction, either side
         _WindSpread ("Wind spread (degrees)", Range(0, 180)) = 60
         _Speed ("Wind speed", Float) = 1
+
+        [Header(Detail Normals)]
+        [Normal][NoScaleOffset] _DetailNormalMap ("Detail Normal Map", 2D) = "bump" {}
+        _DetailStrength ("Detail Strength", Range(0, 2)) = 0.5
+        // Tile sizes in world units; non-multiples of each other hide the repetition
+        _DetailTileA ("Detail Tile Size A", Float) = 7
+        _DetailTileB ("Detail Tile Size B", Float) = 3.3
+        _DetailScrollSpeed ("Detail Scroll Speed", Float) = 0.3
     }
 
     SubShader
@@ -61,6 +69,10 @@ Shader "Custom/Ocean"
             float _WindAngle;
             float _WindSpread;
             float _Speed;
+            half _DetailStrength;
+            float _DetailTileA;
+            float _DetailTileB;
+            float _DetailScrollSpeed;
         CBUFFER_END
 
         float4 _OceanRandom[32];
@@ -173,6 +185,29 @@ Shader "Custom/Ocean"
                 return OUT;
             }
 
+            TEXTURE2D(_DetailNormalMap);
+            SAMPLER(sampler_DetailNormalMap);
+
+            // Two layers of the detail map, scrolling with the wind at different scales and
+            // angles, whiteout-blended onto the wave normal. Mapped in world XZ, so the
+            // tangent-space x/y of the map correspond to world X/Z.
+            half3 ApplyDetailNormals(half3 n, float2 posXZ)
+            {
+                float windAngle = radians(_WindAngle);
+                float2 windA = float2(cos(windAngle), sin(windAngle));
+                float2 windB = float2(cos(windAngle + 0.7), sin(windAngle + 0.7));
+                float t = _Time.y * _DetailScrollSpeed * _Speed;
+
+                float2 uvA = posXZ / _DetailTileA - windA * t / _DetailTileA;
+                float2 uvB = posXZ / _DetailTileB - windB * t * 0.7 / _DetailTileB;
+                half3 a = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvA), _DetailStrength);
+                half3 b = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, uvB), _DetailStrength);
+                half3 detail = normalize(half3(a.xy + b.xy, a.z * b.z));
+
+                // Whiteout blend with the Y-up wave normal (detail z = world Y)
+                return normalize(half3(n.x + detail.x, n.y * detail.z, n.z + detail.y));
+            }
+
             half3 Shade(Light light, half3 albedo, half3 n, half3 v, inout half3 specular)
             {
                 half3 radiance = light.color * light.distanceAttenuation * light.shadowAttenuation;
@@ -184,7 +219,7 @@ Shader "Custom/Ocean"
 
             half4 frag(Varyings IN) : SV_Target
             {
-                half3 n = OceanNormal(IN.gridWS);
+                half3 n = ApplyDetailNormals(OceanNormal(IN.gridWS), IN.gridWS.xz);
                 half3 v = GetWorldSpaceNormalizeViewDir(IN.positionWS);
                 half3 albedo = lerp(_DeepColor.rgb, _CrestColor.rgb, saturate(IN.height * _CrestColorScale + 0.5));
 
