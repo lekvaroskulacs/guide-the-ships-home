@@ -39,7 +39,14 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
+    - _DetailStrength: 0.13
     - _ReflectionStrength: 0.558
+    - _Speed: 0.37
+    - _SteepFactor: 0.95
+    - _Steepness: 0.638
+    - _WaveDrag: 0.37
+    - _Wavelength: 1.18
+    - _WavelengthFactor: 0.98
     m_Colors:
     - _DeepColor: {r: 0.019607844, g: 0.078431375, b: 0.14901961, a: 1}
   m_BuildTextureStacks: []

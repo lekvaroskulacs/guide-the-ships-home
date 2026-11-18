@@ -16,6 +16,29 @@ public class Ship : MonoBehaviour
 
     [SerializeField] List<Transform> samplePoints;
 
+    [SerializeField] int moneyGiven;
+
+    [Tooltip("Money lost when the ship explodes on a rock")]
+    [SerializeField] int explosionPenalty = 100;
+
+    [Tooltip("Seconds the ship keeps avoiding rocks after the beam leaves it")]
+    [SerializeField] float litMemory = 1.5f;
+
+    [Tooltip("NavMesh cost of the Rocks area while lit; high enough that paths go around")]
+    [SerializeField] float litRockCost = 1000f;
+
+    [Tooltip("Agent speed right after spawning")]
+    [SerializeField] float spawnSpeed = 0.1f;
+
+    [Tooltip("Seconds the ship moves at spawnSpeed before switching to its normal speed")]
+    [SerializeField] float spawnSlowDuration = 1f;
+
+    [Tooltip("Optional effect spawned when the ship hits a rock")]
+    [SerializeField] GameObject explosionPrefab;
+
+    // Ships register themselves so the light beam can test them without searching the scene
+    public static readonly List<Ship> All = new List<Ship>();
+
     // Same names as in Ocean.shader
     static readonly int OceanRandomId = Shader.PropertyToID("_OceanRandom");
     static readonly int SteepnessId = Shader.PropertyToID("_Steepness");
@@ -35,6 +58,23 @@ public class Ship : MonoBehaviour
     float height;
     Vector3 normal;
 
+    Player player;
+
+    Vector3 destination;
+    int rocksArea;
+    float litTimer;
+    bool isLit;
+
+    void OnEnable()
+    {
+        All.Add(this);
+    }
+
+    void OnDisable()
+    {
+        All.Remove(this);
+    }
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -45,15 +85,72 @@ public class Ship : MonoBehaviour
         agent = GetComponent<NavMeshAgent>();
         agent.updatePosition = false;
         agent.updateRotation = false;
+        StartCoroutine(SlowStart());
+
+        // Ships start in the dark: rocks cost the same as open water, so they sail straight at them
+        rocksArea = NavMesh.GetAreaFromName("Rocks");
+        if (rocksArea < 0)
+            Debug.LogWarning("No NavMesh area named 'Rocks'; ships won't avoid rocks when lit.");
+        else
+            agent.SetAreaCost(rocksArea, 1f);
 
         GameObject lighthouse = GameObject.FindWithTag("Lighthouse");
         if (lighthouse != null)
-            agent.SetDestination(lighthouse.transform.position);
+        {
+            destination = lighthouse.transform.position;
+            agent.SetDestination(destination);
+        }
+
+        player = GameObject.FindWithTag("Player").GetComponent<Player>();
+    }
+
+    System.Collections.IEnumerator SlowStart()
+    {
+        float normalSpeed = agent.speed;
+        agent.speed = spawnSpeed;
+        yield return new WaitForSeconds(spawnSlowDuration);
+        agent.speed = normalSpeed;
+    }
+
+    // Called every frame by LightBeam while the ship is inside the beam
+    public void SetLit()
+    {
+        litTimer = litMemory;
+    }
+
+    // Repath only when the lit state actually changes, since cost changes don't repath on their own
+    void UpdateLitState()
+    {
+        litTimer -= Time.deltaTime;
+        bool lit = litTimer > 0f;
+        if (lit == isLit)
+            return;
+
+        isLit = lit;
+        if (rocksArea >= 0)
+            agent.SetAreaCost(rocksArea, isLit ? litRockCost : 1f);
+        agent.SetDestination(destination);
+    }
+
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Rock"))
+            Explode();
+    }
+
+    void Explode()
+    {
+        if (explosionPrefab != null)
+            Instantiate(explosionPrefab, transform.position, Quaternion.identity);
+        player.IncreaseMoney(-explosionPenalty);
+        Destroy(gameObject);
     }
 
     // Update is called once per frame
     void Update()
     {
+        UpdateLitState();
+
         Vector3 position = agent.nextPosition;
         position.y = transform.position.y;
         transform.position = position;
@@ -156,5 +253,11 @@ public class Ship : MonoBehaviour
         }
 
         return displacement;
+    }
+
+    public void GoalReached()
+    {
+        player.IncreaseMoney(moneyGiven);
+        Destroy(gameObject);
     }
 }

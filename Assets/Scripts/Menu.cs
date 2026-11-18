@@ -6,6 +6,7 @@ using System.Runtime.ExceptionServices;
 using Unity.VisualScripting;
 using TMPro;
 using System.Collections;
+using UnityEngine.UIElements;
 
 
 public class Menu : MonoBehaviour
@@ -14,12 +15,17 @@ public class Menu : MonoBehaviour
     [SerializeField] CinemachineCamera playCamera;
 
     [SerializeField] GameObject canvas;
-    [SerializeField] List<TMP_Text> fadeElements;
+
+    [SerializeField] GameObject menuPanel;
+    [SerializeField] GameObject upgradesPanel;
 
     [SerializeField] float fadeSpeed;
+
+    [SerializeField] BoatSpawner boatSpawner;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
+        upgradesPanel.SetActive(false);
         menuCamera.Priority = 20;
         playCamera.Priority = 10;
     }
@@ -55,6 +61,7 @@ public class Menu : MonoBehaviour
 
     IEnumerator DisableMenu()
     {
+        var fadeElements = menuPanel.GetComponentsInChildren<TMP_Text>();
         for (float alpha = 1f; alpha >= 0; alpha -= fadeSpeed * Time.deltaTime)
         {
             foreach (var element in fadeElements)
@@ -63,8 +70,27 @@ public class Menu : MonoBehaviour
             }
             yield return null;
         }
+        foreach (var element in fadeElements)
+            element.alpha = 0f;
 
-        canvas.SetActive(false);
+        menuPanel.SetActive(false);
+
+        var unfadeElements = upgradesPanel.GetComponentsInChildren<TMP_Text>();
+        foreach (var element in unfadeElements)
+            element.alpha = 0f;
+        upgradesPanel.SetActive(true);
+
+        for (float alpha = 0f; alpha <= 1f; alpha += fadeSpeed * Time.deltaTime)
+        {
+            foreach (var element in unfadeElements)
+            {
+                element.alpha = alpha;
+            }
+            yield return null;
+        }
+        foreach (var element in unfadeElements)
+            element.alpha = 1f;
+        boatSpawner.StartLevel();
     }
 
 }
